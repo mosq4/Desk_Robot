@@ -278,6 +278,13 @@ def main():
     assert win._last_gcode_dir is None, "保存对话框起始目录应初始为 None"
     print("[OK] 默认目录回归通过")
 
+    # 17. 版本号回归（app/__init__.py 为唯一来源，窗口标题跟随）
+    from app import __version__
+
+    assert __version__, "版本号为空"
+    assert f"v{__version__}" in win.windowTitle(), "窗口标题未跟随版本号"
+    print(f"[OK] 版本号回归通过（v{__version__}）")
+
     print("ALL PASS")
     return 0
 
