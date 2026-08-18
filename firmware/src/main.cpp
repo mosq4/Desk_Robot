@@ -423,13 +423,33 @@ static int execCtlBody(const String &body)
     return sendCtlWaitAck(isX ? CMD_JOG_X : CMD_JOG_Y, p, 4, ACK_TIMEOUT_MS);
   }
 
-  /* ================= 特殊命令 3：抬/落笔（CMD_SET_PEN，协议已定义）================= */
+  /* ================= 特殊命令 3：单电机调试（jogm <电机号> <速度rad/s>）================= */
+  if (body.startsWith("jogm")) {
+    /* 格式: jogm <motor> <speed>，motor=1/2，speed 为关节角速度 rad/s，0=停止 */
+    String rest = body.substring(4);
+    rest.trim();
+    int sp = rest.indexOf(' ');
+    if (sp <= 0) return 4;                       /* 参数不足 */
+    int motor = rest.substring(0, sp).toInt();
+    float v = rest.substring(sp + 1).toFloat();
+    if (motor != 1 && motor != 2) return 4;      /* 仅支持电机 1/2 */
+    /* 速度限幅：±JOG_MOTOR_SPEED_MAX（rad/s）*/
+    if (v > JOG_MOTOR_SPEED_MAX) v = JOG_MOTOR_SPEED_MAX;
+    if (v < -JOG_MOTOR_SPEED_MAX) v = -JOG_MOTOR_SPEED_MAX;
+    /* payload: [u8 电机号][float32 速度 rad/s 小端]（CMD_JOG_MOTOR 协议已定义）*/
+    uint8_t p[5];
+    p[0] = (uint8_t)motor;
+    protoPutFloat(p + 1, v);
+    return sendCtlWaitAck(CMD_JOG_MOTOR, p, 5, ACK_TIMEOUT_MS);
+  }
+
+  /* ================= 特殊命令 4：抬/落笔（CMD_SET_PEN，协议已定义）================= */
   if (body == "pen_up" || body == "pen_down") {
     uint8_t p[1] = { (body == "pen_down") ? 1 : 0 };
     return sendCtlWaitAck(CMD_SET_PEN, p, 1, ACK_TIMEOUT_MS);
   }
 
-  /* ================= 特殊命令 4：电机使能/失能（STM32 侧协议待补全）================= */
+  /* ================= 特殊命令 5：电机使能/失能（STM32 侧协议待补全）================= */
   if (body == "enable" || body == "disable") {
     /* TODO(STM32): 在 protocol.h 增加 CMD_ENABLE / CMD_DISABLE 命令码
        并实现驱动使能/失能后，在此处映射并转发；

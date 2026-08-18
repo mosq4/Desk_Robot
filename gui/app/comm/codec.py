@@ -21,8 +21,6 @@ from __future__ import annotations
 
 # 上位机指令名 → TCP 协议命令名
 _TCP_CMD_MAP = {
-    "ENABLE": "enable",
-    "DISABLE": "disable",
     "ZERO": "setzero",
     "HOME": "return_zero",
     "PEN_UP": "pen_up",
@@ -34,6 +32,7 @@ _TCP_CMD_MAP = {
     "START": "start",
     "JOG_X": "jogx",
     "JOG_Y": "jogy",
+    "JOGM": "jogm",          # 单电机调试: jogm <电机> <rad/s>
 }
 
 

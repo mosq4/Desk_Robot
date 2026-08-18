@@ -45,7 +45,6 @@ def main():
     # 3. 连接仿真后端
     assert win.controller.connect_backend("simulation"), "仿真连接失败"
     win.control_tab.set_connected(True)
-    win.controller.send_command("ENABLE")  # 仿真下位机：电机未使能时不执行
     print("[OK] 仿真后端已连接")
 
     # 4. 整段下发
@@ -69,9 +68,9 @@ def main():
     assert abs(ex - 10) < 0.5 and abs(ey - 10) < 0.5, f"末端位置错误: ({ex}, {ey})"
     print(f"[OK] 末端位置 ({ex:.2f}, {ey:.2f}) 正确")
 
-    # 7. 控制指令路径：jog / 使能 / 暂停 等不抛异常
-    win.controller.send_command("ENABLE")
-    win.controller.send_command("JOG", "20 0")
+    # 7. 控制指令路径：jog（长按速度式）/ 暂停 等不抛异常
+    win.controller.send_command("JOG_X", "20")   # 按住
+    win.controller.send_command("JOG_X", "0")    # 松开停止
     assert wait_until(app, lambda: sim.state == "IDLE", 3.0)
     win.controller.send_command("ZERO")
     win.controller.send_command("ESTOP")
@@ -308,13 +307,16 @@ def main():
             "电机/队列/下发字段缺失"
         print(f"[OK] TCP 状态帧解析: {st.state}({st.state_name}) X={st.x:.2f}")
 
-        # 命令送达：ZERO→setzero；ENABLE 应收到未实现提示（code=7）
+        # 命令送达：ZERO→setzero；JOGM 单电机调试→jogm；pen_up 抬笔
         assert ctrl.send_command("ZERO"), "ZERO 发送失败"
         assert wait_until(app, lambda: "setzero" in server.cmds, 3.0), \
             "ZERO 未送达"
-        ctrl.send_command("ENABLE")
-        assert wait_until(app, lambda: "enable" in server.cmds, 3.0), \
-            "ENABLE 未送达"
+        assert ctrl.send_command("JOGM", "1 1.00"), "JOGM 发送失败"
+        assert wait_until(app, lambda: "jogm 1 1.00" in server.cmds, 3.0), \
+            "JOGM 未送达"
+        assert ctrl.send_command("PEN_UP"), "PEN_UP 发送失败"
+        assert wait_until(app, lambda: "pen_up" in server.cmds, 3.0), \
+            "PEN_UP 未送达"
         print(f"[OK] TCP 命令送达: {server.cmds}")
 
         # 整段 G-code 上传 → 自动触发 START（复刻 main_window._on_segment_finished）

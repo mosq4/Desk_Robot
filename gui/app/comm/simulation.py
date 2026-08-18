@@ -33,6 +33,8 @@ class SimulationTransport(QObject):
         self._exec_index = 0         # 当前执行行号
         self._jogging = False
         self._jog_v = [0.0, 0.0]     # 速度式点动：X/Y 轴速度 mm/s（JOG_X/JOG_Y）
+        self._m1_debug_v = 0.0       # 单电机调试速度 rad/s（仿真仅记录）
+        self._m2_debug_v = 0.0
 
         self.pos = [0.0, 0.0]        # 原始坐标
         self.zero = [0.0, 0.0]       # 零点偏移
@@ -55,6 +57,8 @@ class SimulationTransport(QObject):
     def connect(self) -> bool:
         self._connected = True
         self.state = "IDLE"
+        # 仿真无硬件：电机默认在线（上位机已移除使能/失能入口）
+        self.motors = True
         self.state_changed.emit(True)
         self._reply("STATUS:" + self._status_text())
         return True
@@ -174,6 +178,21 @@ class SimulationTransport(QObject):
         elif name == "START":
             if self.state == "IDLE":
                 self._start()
+            self._ack()
+        elif name == "JOGM":
+            # 单电机调试：仿真中仅确认（无真实电机运动），记录速度到电机状态
+            parts = args.split()
+            if len(parts) >= 2:
+                try:
+                    m = int(parts[0])
+                    v = float(parts[1])
+                except ValueError:
+                    self._reply("ERR JOGM 参数错误")
+                    return
+                if m == 1:
+                    self._m1_debug_v = v
+                elif m == 2:
+                    self._m2_debug_v = v
             self._ack()
         elif name == "JOG_X" or name == "JOG_Y":
             axis = 0 if name == "JOG_X" else 1

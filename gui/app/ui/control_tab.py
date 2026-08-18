@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtWidgets import (QComboBox, QGridLayout, QGroupBox, QHBoxLayout,
-                             QLabel, QLineEdit, QProgressBar, QPushButton,
-                             QSpinBox, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QComboBox, QDoubleSpinBox, QGridLayout,
+                             QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+                             QProgressBar, QPushButton, QSpinBox,
+                             QVBoxLayout, QWidget)
 
 from ..comm.controller import Status
 
@@ -36,6 +37,10 @@ class ControlTab(QWidget):
         self._jog_timer = QTimer(self)  # 按住期间周期重发速度（防 STM32 1s 看门狗）
         self._jog_timer.setInterval(400)
         self._jog_timer.timeout.connect(self._jog_repeat)
+        self._motor_axis = None        # 当前按住的单电机 (motor, dir)
+        self._motor_timer = QTimer(self)  # 单电机调试同样周期重发
+        self._motor_timer.setInterval(400)
+        self._motor_timer.timeout.connect(self._motor_repeat)
 
         # ---------------- 连接 ----------------
         g_conn = QGroupBox("连接")
@@ -102,19 +107,14 @@ class ControlTab(QWidget):
         jog_box.addStretch(1)
         jog_box.addWidget(self.cmb_speed)
 
-        self.btn_enable = QPushButton("电机使能")
-        self.btn_enable.clicked.connect(lambda: self.command_requested.emit("ENABLE", ""))
-        self.btn_disable = QPushButton("电机失能")
-        self.btn_disable.clicked.connect(lambda: self.command_requested.emit("DISABLE", ""))
         self.btn_zero = QPushButton("设零点")
         self.btn_zero.clicked.connect(lambda: self.command_requested.emit("ZERO", ""))
         self.btn_home = QPushButton("回零")
         self.btn_home.clicked.connect(lambda: self.command_requested.emit("HOME", ""))
         row_motion = QHBoxLayout()
-        row_motion.addWidget(self.btn_enable)
-        row_motion.addWidget(self.btn_disable)
         row_motion.addWidget(self.btn_zero)
         row_motion.addWidget(self.btn_home)
+        row_motion.addStretch(1)
 
         v_motion = QVBoxLayout()
         v_motion.addLayout(jog_box)
@@ -167,8 +167,28 @@ class ControlTab(QWidget):
         v_run.addWidget(self.lbl_progress)
         g_run.setLayout(v_run)
 
-        # ---------------- 笔 ----------------
-        g_pen = QGroupBox("笔控制")
+        # ---------------- 调试 ----------------
+        g_dbg = QGroupBox("调试（单电机 / 抬落笔）")
+        self.spin_motor_speed = QDoubleSpinBox()
+        self.spin_motor_speed.setRange(0.1, 10.0)
+        self.spin_motor_speed.setSingleStep(0.5)
+        self.spin_motor_speed.setValue(1.0)
+        self.spin_motor_speed.setSuffix(" rad/s")
+
+        # 单电机正反转（长按移动、松开停止）：(电机号, 方向)
+        dbg_grid = QGridLayout()
+        for i, (motor, label) in enumerate(
+                ((1, "M1 正转"), (1, "M1 反转"), (2, "M2 正转"), (2, "M2 反转"))):
+            btn = QPushButton(label)
+            btn.setFixedSize(84, 28)
+            direction = 1 if "正转" in label else -1
+            btn.pressed.connect(
+                lambda m=motor, d=direction: self._motor_press(m, d))
+            btn.released.connect(lambda m=motor: self._motor_release(m))
+            dbg_grid.addWidget(btn, i // 2, i % 2)
+        dbg_grid.addWidget(QLabel("速度"), 2, 0)
+        dbg_grid.addWidget(self.spin_motor_speed, 2, 1)
+
         self.btn_pen_up = QPushButton("抬笔")
         self.btn_pen_up.clicked.connect(lambda: self.command_requested.emit("PEN_UP", ""))
         self.btn_pen_down = QPushButton("落笔")
@@ -177,7 +197,11 @@ class ControlTab(QWidget):
         row_pen.addWidget(self.btn_pen_up)
         row_pen.addWidget(self.btn_pen_down)
         row_pen.addStretch(1)
-        g_pen.setLayout(row_pen)
+
+        v_dbg = QVBoxLayout()
+        v_dbg.addLayout(dbg_grid)
+        v_dbg.addLayout(row_pen)
+        g_dbg.setLayout(v_dbg)
 
         # ---------------- 状态 ----------------
         self.lbl_status = QLabel("状态: 未连接")
@@ -187,7 +211,7 @@ class ControlTab(QWidget):
         v.addWidget(g_conn)
         v.addWidget(g_motion)
         v.addWidget(g_run)
-        v.addWidget(g_pen)
+        v.addWidget(g_dbg)
         v.addWidget(self.lbl_status)
         v.addStretch(1)
 
@@ -199,12 +223,17 @@ class ControlTab(QWidget):
     def set_connected(self, ok: bool):
         self._connected = ok
         self.btn_connect.setText("断开" if ok else "连接")
-        for w in (self.btn_enable, self.btn_disable, self.btn_zero, self.btn_home,
+        for w in (self.btn_zero, self.btn_home,
                   self.btn_run, self.btn_pause, self.btn_resume, self.btn_stop,
                   self.btn_estop, self.btn_pen_up, self.btn_pen_down):
             w.setEnabled(ok)
+        # 单电机调试按钮（调试组内的 4 个按钮）
+        for btn in self.findChildren(QPushButton):
+            if btn.text() in ("M1 正转", "M1 反转", "M2 正转", "M2 反转"):
+                btn.setEnabled(ok)
         if not ok:
             self._jog_stop()
+            self._motor_stop_all()
 
     def set_ports(self, ports):
         self.cmb_port.clear()
@@ -319,6 +348,33 @@ class ControlTab(QWidget):
     def _jog_stop(self):
         self._jog_timer.stop()
         self._jog_axis = None
+
+    # ---------------- 单电机调试（长按式） ----------------
+
+    def _motor_press(self, motor: int, direction: int):
+        if not self._connected:
+            return
+        self._motor_axis = (motor, direction)
+        self._motor_send_speed(motor, direction)
+        self._motor_timer.start()
+
+    def _motor_release(self, motor: int):
+        self._motor_timer.stop()
+        self._motor_axis = None
+        if self._connected:
+            self.command_requested.emit("JOGM", f"{motor} 0")
+
+    def _motor_repeat(self):
+        if self._motor_axis is not None and self._connected:
+            self._motor_send_speed(*self._motor_axis)
+
+    def _motor_send_speed(self, motor: int, direction: int):
+        v = self.spin_motor_speed.value()
+        self.command_requested.emit("JOGM", f"{motor} {direction * v:.2f}")
+
+    def _motor_stop_all(self):
+        self._motor_timer.stop()
+        self._motor_axis = None
 
     def _on_connect_clicked(self):
         if self._connected:

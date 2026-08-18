@@ -35,6 +35,8 @@ ESP32 以 AP 模式运行，网页通过 HTTP 与 ESP32 交互；ESP32 再按《
 | `setzero` | SET_ZERO | 设置零点：把当前笔尖位置标定为世界坐标原点（约 0.4s，状态经 ZEROING→READY） |
 | `return_zero` | RETURN_ZERO | 回零：抬笔回到零点（状态经 HOMING→READY） |
 | `jogx <v>` / `jogy <v>` | JOG_X / JOG_Y | 笛卡尔点动：末端 X/Y 速度 mm/s（限幅 ±60），`0` 停止该轴；网页方向键按住移动、松开停止 |
+| `jogm <电机> <v>` | JOG_MOTOR | 单电机调试：电机 1/2 按速度 rad/s 正反转（限幅 ±5，见 config.h `JOG_MOTOR_SPEED_MAX`），`0` 停止；上位机调试模式使用 |
+| `pen_up` / `pen_down` | SET_PEN | 抬笔 / 落笔（上位机调试模式；STM32 侧实现待确认） |
 
 响应 JSON：
 
@@ -136,7 +138,7 @@ ESP32 在 AP 模式下额外提供 **TCP 服务**（端口 8080，见 `config.h`
 
 | 帧 | 说明 |
 |---|---|
-| `CMD:<name> [args]` | 控制命令，命令集与 `/api/ctl` 完全一致：`start` / `stop` / `pause` / `resume` / `estop` / `clear_estop` / `setzero` / `return_zero` / `pen_up` / `pen_down` / `enable` / `disable` / `jogx <v>` / `jogy <v>`（v 为末端速度 mm/s，限幅 ±30，0=停止） |
+| `CMD:<name> [args]` | 控制命令，命令集与 `/api/ctl` 完全一致：`start` / `stop` / `pause` / `resume` / `estop` / `clear_estop` / `setzero` / `return_zero` / `pen_up` / `pen_down` / `jogx <v>` / `jogy <v>`（v 为末端速度 mm/s，限幅 ±30，0=停止）/ `jogm <电机> <rad/s>`（单电机调试，限幅 ±5，0=停止） |
 | `GCODE:<n>` | 开始上传 n 行 G-code（1~600），随后发送 n 行裸 G-code 正文，收满后自动缓存；绘画中（RUNNING/PAUSED）上传被拒 |
 | `STATUS` | 查询状态，返回 `S:{json}` |
 | `CONFIG` | 查询配置，返回 `C:{json}` |
@@ -153,4 +155,4 @@ ESP32 在 AP 模式下额外提供 **TCP 服务**（端口 8080，见 `config.h`
 
 - 上传 G-code 后需发 `CMD:start` 才开始绘画；`CMD:start` 内部自动完成"下发首行→START→边画边下发"（同网页端）
 - `pen_up` / `pen_down` 映射 STM32 协议 `CMD_SET_PEN(0x0D)`；若 STM32 侧未实现会返回 code=3 或 1
-- `enable` / `disable`（电机使能/失能）当前返回 code=7"未实现"，需要在下位机协议中新增命令码并实现驱动使能后补全
+- `jogm <电机> <rad/s>` 映射 STM32 协议 `CMD_JOG_MOTOR(0x0B)`，供上位机调试模式控制单个电机正反转
