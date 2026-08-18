@@ -269,10 +269,10 @@ def main():
     assert len(ordered) == len(real_strokes), "排序丢失了笔画"
     print(f"[OK] 真实轨迹排序回归通过（247 笔，空走 {before:.0f}→{after:.0f}mm）")
 
-    # 16. 文件对话框默认目录（首次打开应落在 Desk Robot 项目目录）
+    # 16. 文件对话框默认目录（首次打开应落在上位机 gui 目录）
     from app.settings import PROJECT_DIR
 
-    assert os.path.basename(PROJECT_DIR) == "Desk Robot", \
+    assert os.path.basename(PROJECT_DIR) == "gui", \
         f"PROJECT_DIR 异常: {PROJECT_DIR}"
     assert win.image_tab._last_dir is None, "图片对话框起始目录应初始为 None"
     assert win._last_gcode_dir is None, "保存对话框起始目录应初始为 None"

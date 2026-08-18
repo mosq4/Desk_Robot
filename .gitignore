@@ -3,17 +3,22 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 
-# 运行时生成
+# 上位机运行时（gui/）
 logs/
 config/
 test_out.txt
 .git-credentials
+**/tests/测试图片.png
 
-# 临时测试文件
-tests/测试图片.png
+# PlatformIO 下位机固件（firmware/）
+.pio/
+firmware/.vscode/c_cpp_properties.json
+firmware/.vscode/launch.json
+firmware/.vscode/ipch/
+firmware/.vscode/.browse.c_cpp.db*
 
 # 编辑器/系统
+/.vscode/
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
