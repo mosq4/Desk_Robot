@@ -165,11 +165,12 @@ class MainWindow(QMainWindow):
         # 启动时恢复参数
         self.image_tab.apply_params(self._image_params)
         self.control_tab.spin_feed.setValue(self._gcode_params.feed_rate)
-        self.control_tab.cmb_backend.setCurrentIndex(
-            0 if self.settings.backend() != "serial" else 1
-        )
+        self.control_tab.set_backend(self.settings.backend())
         if self.settings.port():
-            self.control_tab.cmb_port.setEditText(self.settings.port())
+            if self.settings.backend() == "tcp":
+                self.control_tab.edt_tcp.setText(self.settings.port())
+            else:
+                self.control_tab.cmb_port.setEditText(self.settings.port())
         self._refresh_ports()
         self._load_image_params_info()
 
@@ -399,7 +400,7 @@ class MainWindow(QMainWindow):
         ok = self.controller.connect_backend(backend, port, baudrate)
         if ok:
             self.settings.set_backend(backend)
-            if backend == "serial":
+            if backend in ("serial", "tcp"):
                 self.settings.set_port(port)
             self.settings.set_baudrate(baudrate)
             self.control_tab.set_connected(True)
@@ -411,7 +412,9 @@ class MainWindow(QMainWindow):
     def _on_feed_changed(self, value: int):
         self._gcode_params.feed_rate = value
         self.settings.set_gcode_params(self._gcode_params)
-        self.controller.send_command("FEED", str(value))
+        # 仿真后端需要单独下发 FEED；TCP 后端进给已内嵌在 G-code 的 F 值中
+        if not self.controller.is_tcp():
+            self.controller.send_command("FEED", str(value))
 
     def _on_run(self):
         text = self.gcode_tab.text()
@@ -454,6 +457,6 @@ class MainWindow(QMainWindow):
         self.settings.set_gcode_params(self._gcode_params)
         self.settings.set_backend(self.control_tab.backend())
         self.settings.set_baudrate(self.control_tab.baudrate())
-        if self.control_tab.backend() == "serial" and self.control_tab.port():
+        if self.control_tab.backend() in ("serial", "tcp") and self.control_tab.port():
             self.settings.set_port(self.control_tab.port())
         super().closeEvent(event)

@@ -32,6 +32,7 @@ class SimulationTransport(QObject):
         self._buffer = []            # 整段 G-code 行（下位机缓冲）
         self._exec_index = 0         # 当前执行行号
         self._jogging = False
+        self._jog_v = [0.0, 0.0]     # 速度式点动：X/Y 轴速度 mm/s（JOG_X/JOG_Y）
 
         self.pos = [0.0, 0.0]        # 原始坐标
         self.zero = [0.0, 0.0]       # 零点偏移
@@ -159,6 +160,7 @@ class SimulationTransport(QObject):
         elif name == "STOP":
             self._tick.stop()
             self._jogging = False
+            self._jog_v = [0.0, 0.0]
             self._buffer = []
             self._exec_index = 0
             self.state = "IDLE"
@@ -166,11 +168,30 @@ class SimulationTransport(QObject):
         elif name == "ESTOP":
             self._tick.stop()
             self._jogging = False
+            self._jog_v = [0.0, 0.0]
             self.state = "ESTOP"
             self._ack()
         elif name == "START":
             if self.state == "IDLE":
                 self._start()
+            self._ack()
+        elif name == "JOG_X" or name == "JOG_Y":
+            axis = 0 if name == "JOG_X" else 1
+            try:
+                self._jog_v[axis] = float(args) if args.strip() else 0.0
+            except ValueError:
+                self._reply(f"ERR {name} 参数错误")
+                return
+            if any(v != 0.0 for v in self._jog_v):
+                if self.motors and self.state == "IDLE":
+                    self._jogging = True
+                    self.state = "RUNNING"
+                    self._tick.start()
+            else:
+                self._jogging = False
+                if self.state == "RUNNING" and not self._buffer:
+                    self._tick.stop()
+                    self.state = "IDLE"
             self._ack()
         elif name == "JOG":
             parts = args.split()
@@ -214,8 +235,13 @@ class SimulationTransport(QObject):
         if self.state != "RUNNING":
             return
         if self._jogging:
-            self._move_toward(self.target, self.JOG_FEED)
-            if self._arrived():
+            # 速度式点动：按 JOG_X/JOG_Y 速度持续移动（任一轴非 0 则运动）
+            vx, vy = self._jog_v
+            if vx != 0.0 or vy != 0.0:
+                dt = self.TICK_MS / 1000.0
+                self.pos[0] += vx * dt
+                self.pos[1] += vy * dt
+            else:
                 self._jogging = False
                 if not self._buffer:
                     self._tick.stop()

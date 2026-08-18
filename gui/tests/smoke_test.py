@@ -285,6 +285,54 @@ def main():
     assert f"v{__version__}" in win.windowTitle(), "窗口标题未跟随版本号"
     print(f"[OK] 版本号回归通过（v{__version__}）")
 
+    # 18. TCP 后端联调（mock ESP32：行协议 R:/S:/C: + CMD/GCODE 上传）
+    from app.comm.controller import Controller
+    from tests.tcp_mock_esp32 import MockEsp32Server
+
+    server = MockEsp32Server()
+    server.start()
+    ctrl = Controller()
+    try:
+        assert ctrl.connect_backend("tcp", f"127.0.0.1:{server.port}"), \
+            "TCP 连接失败"
+        statuses = []
+        ctrl.status_updated.connect(lambda st: statuses.append(st))
+        assert wait_until(app, lambda: len(statuses) > 0, 5.0), \
+            "未收到 TCP 状态帧"
+        st = statuses[-1]
+        assert st.state == "就绪" and st.state_name == "READY", \
+            f"状态解析错误: {st.raw}"
+        assert abs(st.x - 30.12) < 1e-6 and st.motors, \
+            f"字段解析错误: x={st.x} motors={st.motors}"
+        assert st.m1.get("e") == 1 and st.q == 5 and st.feed_total == 40, \
+            "电机/队列/下发字段缺失"
+        print(f"[OK] TCP 状态帧解析: {st.state}({st.state_name}) X={st.x:.2f}")
+
+        # 命令送达：ZERO→setzero；ENABLE 应收到未实现提示（code=7）
+        assert ctrl.send_command("ZERO"), "ZERO 发送失败"
+        assert wait_until(app, lambda: "setzero" in server.cmds, 3.0), \
+            "ZERO 未送达"
+        ctrl.send_command("ENABLE")
+        assert wait_until(app, lambda: "enable" in server.cmds, 3.0), \
+            "ENABLE 未送达"
+        print(f"[OK] TCP 命令送达: {server.cmds}")
+
+        # 整段 G-code 上传 → 自动触发 START（复刻 main_window._on_segment_finished）
+        server.gcode.clear()
+        gcode_tcp = trajectory_to_gcode(win.trajectory, GcodeParams(feed_rate=2400))
+        ctrl.segment_finished.connect(lambda: ctrl.send_command("START"))
+        assert ctrl.send_segment(gcode_tcp), "send_segment 失败"
+        assert wait_until(app, lambda: len(server.gcode) >= 3, 8.0), \
+            f"G-code 未完整上传: {len(server.gcode)} 行"
+        assert wait_until(app, lambda: "start" in server.cmds, 5.0), \
+            "上传后未自动发 START"
+        print(f"[OK] TCP G-code 上传 {len(server.gcode)} 行 → START 自动触发")
+
+        ctrl.disconnect()
+    finally:
+        server.stop()
+    print("[OK] TCP 后端联调通过")
+
     print("ALL PASS")
     return 0
 
